@@ -1,15 +1,21 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { LPS, LpsDocument, Line, Sub } from '../src/index';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
+import { readFileSync, existsSync } from 'fs';
 
-const getInfoLps = () => {
-  return readFileSync('VPet/mod/0000_core/info.lps', 'utf-8');
-};
+const FIXTURE_PATH = 'VPet/mod/0000_core/info.lps';
 
-describe('VPet info.lps integration', () => {
-  const lpsContent = getInfoLps();
-  const doc = new LPS(lpsContent);
+// Skip the entire suite when the VPet fixture file is not available
+// (e.g. CI, npm install, fresh clone without the VPet submodule)
+const hasFixture = existsSync(FIXTURE_PATH);
+
+(hasFixture ? describe : describe.skip)('VPet info.lps integration', () => {
+  let lpsContent: string;
+  let doc: LPS;
+
+  beforeAll(() => {
+    lpsContent = readFileSync(FIXTURE_PATH, 'utf-8');
+    doc = new LPS(lpsContent);
+  });
 
   it('parses all lines', () => {
     expect(doc.count).toBe(8);

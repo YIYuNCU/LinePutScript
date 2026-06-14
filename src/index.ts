@@ -1,18 +1,11 @@
-// Utils
-export { textReplace, textDeReplace } from './utils/escaping';
-export { getHashCode, getHashCode32 } from './utils/hashing';
-export { splitLimited } from './utils/parsing';
-export { FInt64 } from './utils/fint64';
+// Core classes
+export { Sub, Line, LineDict, LPS, LpsDocument } from './core';
 
-// Types
-export type { ISetObject, ISub, ILine, ILpsDocument } from './types/interfaces';
+// Interfaces (type-only)
+export type { ISetObject, ISub, ILine, ILpsDocument } from './types';
 
-// Core
-export { Sub } from './core/sub';
-export { Line } from './core/line';
-export { LineDict } from './core/line-dict';
-export { LpsDocument } from './core/lps-document';
-export { LPS } from './core/lps';
+// Utilities
+export { FInt64, textReplace, textDeReplace, getHashCode, getHashCode32, splitLimited } from './utils';
 
 // Structure
-export { StringStructure } from './structure/string-structure';
+export { StringStructure } from './structure';

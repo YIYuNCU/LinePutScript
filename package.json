@@ -1,6 +1,6 @@
 {
   "name": "lineputscript",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "JavaScript/TypeScript SDK for the LinePutScript (LPS) data format",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -10,16 +10,54 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core.d.ts",
+      "import": "./dist/core.mjs",
+      "require": "./dist/core.js"
+    },
+    "./utils": {
+      "types": "./dist/utils.d.ts",
+      "import": "./dist/utils.mjs",
+      "require": "./dist/utils.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "import": "./dist/types.mjs",
+      "require": "./dist/types.js"
+    },
+    "./structure": {
+      "types": "./dist/structure.d.ts",
+      "import": "./dist/structure.mjs",
+      "require": "./dist/structure.js"
     }
   },
+  "typesVersions": {
+    "*": {
+      "core": [
+        "./dist/core.d.ts"
+      ],
+      "utils": [
+        "./dist/utils.d.ts"
+      ],
+      "types": [
+        "./dist/types.d.ts"
+      ],
+      "structure": [
+        "./dist/structure.d.ts"
+      ]
+    }
+  },
+  "sideEffects": false,
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format esm,cjs --dts --clean",
+    "build": "tsup && node scripts/clean-dist.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run lint && npm run test && npm run build"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
@@ -30,5 +68,25 @@
   "engines": {
     "node": ">=18"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YIYuNCU/LinePutScript.git",
+    "directory": "packages/lineputscript-js"
+  },
+  "keywords": [
+    "lps",
+    "lineputscript",
+    "vpet",
+    "parser",
+    "data-format",
+    "hierarchical",
+    "key-value",
+    "structured-text"
+  ],
+  "author": "YIYuNCU",
+  "bugs": {
+    "url": "https://github.com/YIYuNCU/LinePutScript/issues"
+  },
+  "homepage": "https://github.com/YIYuNCU/LinePutScript/tree/JS#readme"
 }
