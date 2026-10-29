@@ -1,7 +1,37 @@
 import { ISub, ILine, ILpsDocument } from '../types/interfaces';
 import { Line } from './line';
+import { LineBase } from './line-base';
 import { FInt64 } from '../utils/fint64';
+import { minDate, wrapInt64 } from '../utils/numeric';
 
+/**
+ * Split LPS file text into its non-empty lines and pass each to `onLine`.
+ * Mirrors `LPS.Load`: "\r" is dropped, ":\n|" becomes "/n" and ":\n:" is removed
+ * (both are line continuations); only truly empty lines are skipped.
+ */
+export function forEachLpsLine(text: string, onLine: (line: string) => void): void {
+  let s = text;
+  if (s.charCodeAt(0) === 0xfeff) s = s.substring(1); // byte order mark
+  if (s.indexOf('\r') !== -1) s = s.replace(/\r/g, '');
+  if (s.indexOf(':\n') !== -1) s = s.replace(/:\n\|/g, '/n').replace(/:\n:/g, '');
+  const len = s.length;
+  let pos = 0;
+  while (pos < len) {
+    let end = s.indexOf('\n', pos);
+    if (end === -1) end = len;
+    if (end > pos) onLine(s.substring(pos, end));
+    pos = end + 1;
+  }
+}
+
+/** The always- serialisation of any line implementation. */
+export function lpsString(line: ILine): string {
+  const parts: string[] = [];
+  line.toString(parts);
+  return parts[1];
+}
+
+/** An ordered LPS document: a list of lines in file order. */
 export class LPS implements ILpsDocument {
   public assemblage: ILine[];
 
@@ -21,19 +51,16 @@ export class LPS implements ILpsDocument {
   load(lines: ILine[]): void;
   load(lpsOrLines: string | ILine[]): void {
     if (typeof lpsOrLines === 'string') {
-      this.assemblage = [];
-      const normalized = lpsOrLines.replace(/\r/g, '').replace(/:\n\|/g, '/n').replace(/:\n:/g, '');
-      const file = normalized.split('\n').filter(line => line.trim().length > 0);
-      for (const str of file) {
-        const line = new Line();
-        line.load(str);
-        this.assemblage.push(line);
-      }
+      const lines: ILine[] = [];
+      forEachLpsLine(lpsOrLines, (str) => lines.push(new Line(str)));
+      this.assemblage = lines;
     } else {
       this.assemblage = [];
       this.addRange(lpsOrLines);
     }
   }
+
+  clear(): void { this.assemblage = []; }
 
   addLine(newLine: ILine): void { this.assemblage.push(newLine); }
 
@@ -49,26 +76,28 @@ export class LPS implements ILpsDocument {
   insertRange(index: number, newLines: ILine[]): void { this.assemblage.splice(index, 0, ...newLines); }
 
   remove(target: ILine | string): boolean {
+    const a = this.assemblage;
     if (typeof target === 'string') {
-      for (let i = 0; i < this.assemblage.length; i++) {
-        if (this.assemblage[i].name === target) { this.assemblage.splice(i, 1); return true; }
+      for (let i = 0; i < a.length; i++) {
+        if (a[i].name === target) { a.splice(i, 1); return true; }
       }
       return false;
     }
-    const idx = this.assemblage.indexOf(target);
+    const idx = a.indexOf(target);
     if (idx === -1) return false;
-    this.assemblage.splice(idx, 1);
+    a.splice(idx, 1);
     return true;
   }
 
   removeAll(target: ILine | string): void {
+    const a = this.assemblage;
+    let w = 0;
     if (typeof target === 'string') {
-      for (let i = this.assemblage.length - 1; i >= 0; i--)
-        if (this.assemblage[i].name === target) this.assemblage.splice(i, 1);
+      for (let r = 0; r < a.length; r++) if (a[r].name !== target) a[w++] = a[r];
     } else {
-      for (let i = this.assemblage.length - 1; i >= 0; i--)
-        if (this.assemblage[i] === target) this.assemblage.splice(i, 1);
+      for (let r = 0; r < a.length; r++) if (a[r] !== target) a[w++] = a[r];
     }
+    a.length = w;
   }
 
   removeAt(index: number): void { this.assemblage.splice(index, 1); }
@@ -78,14 +107,18 @@ export class LPS implements ILpsDocument {
     return this.assemblage.some(line => line.contains(target as ISub));
   }
 
-  containsLine(value: string): boolean { return this.assemblage.some(line => line.name === value); }
-  containsSub(value: string): boolean { return this.assemblage.some(line => line.containsByName(value)); }
+  containsLine(value: string): boolean { return this.findLine(value) !== null; }
+  containsSub(value: string): boolean { return this.assemblage.some(line => line.contains(value)); }
 
   findLine(lineName: string): ILine | null;
   findLine(lineName: string, lineinfo: string): ILine | null;
   findLine(lineName: string, lineinfo?: string): ILine | null {
-    if (lineinfo === undefined) return this.assemblage.find(x => x.name === lineName) ?? null;
-    return this.assemblage.find(x => x.name === lineName && x.info === lineinfo) ?? null;
+    const a = this.assemblage;
+    for (let i = 0; i < a.length; i++) {
+      const x = a[i];
+      if (x.name === lineName && (lineinfo === undefined || x.info === lineinfo)) return x;
+    }
+    return null;
   }
 
   findLineInfo(lineinfo: string): ILine | null {
@@ -100,6 +133,9 @@ export class LPS implements ILpsDocument {
     this.assemblage.push(line);
     return line;
   }
+
+  /** Find the line or add an empty one (the C# indexer getter). */
+  get(lineName: string): ILine { return this.findorAddLine(lineName); }
 
   findAllLine(lineName: string): ILine[];
   findAllLine(lineName: string, lineinfo: string): ILine[];
@@ -131,13 +167,16 @@ export class LPS implements ILpsDocument {
   findAllSub(subName: string, subinfo: string): ISub[];
   findAllSub(subName: string, subinfo?: string): ISub[] {
     const results: ISub[] = [];
-    for (const line of this.assemblage) results.push(...(subinfo !== undefined ? line.findAll(subName, subinfo) : line.findAll(subName)));
+    for (const line of this.assemblage) {
+      const found = subinfo !== undefined ? line.findAll(subName, subinfo) : line.findAll(subName);
+      for (const s of found) results.push(s);
+    }
     return results;
   }
 
   findAllSubInfo(subinfo: string): ISub[] {
     const results: ISub[] = [];
-    for (const line of this.assemblage) results.push(...line.findAllInfo(subinfo));
+    for (const line of this.assemblage) for (const s of line.findAllInfo(subinfo)) results.push(s);
     return results;
   }
 
@@ -146,7 +185,7 @@ export class LPS implements ILpsDocument {
 
   searchAllSub(value: string): ISub[] {
     const results: ISub[] = [];
-    for (const line of this.assemblage) results.push(...line.searchAll(value));
+    for (const line of this.assemblage) for (const s of line.searchAll(value)) results.push(s);
     return results;
   }
 
@@ -167,25 +206,33 @@ export class LPS implements ILpsDocument {
   first(): ILine | null { return this.assemblage.length > 0 ? this.assemblage[0] : null; }
   last(): ILine | null { return this.assemblage.length > 0 ? this.assemblage[this.assemblage.length - 1] : null; }
 
+  toList(): ILine[] { return this.assemblage.slice(); }
+
+  [Symbol.iterator](): Iterator<ILine> { return this.assemblage[Symbol.iterator](); }
+
   getLongHashCode(): bigint {
     let hash = 0n;
     for (const line of this.assemblage) hash += line.getLongHashCode();
-    return hash;
+    return wrapInt64(hash);
+  }
+
+  getHashCode(): number {
+    return Number(BigInt.asIntN(32, this.getLongHashCode()));
   }
 
   // Typed shorthands on lines
   getLineBool(lineName: string): boolean { return this.findLine(lineName)?.getBoolean() ?? false; }
-  setLineBool(lineName: string, value: boolean): void { this.findorAddLine(lineName).infoToBoolean = value; }
+  setLineBool(lineName: string, value: boolean): void { this.findorAddLine(lineName).setBoolean(value); }
 
   getLineInt(lineName: string, defaultValue: number = 0): number {
-    return this.findLine(lineName)?.infoToInt ?? defaultValue;
+    return this.findLine(lineName)?.getInteger() ?? defaultValue;
   }
-  setLineInt(lineName: string, value: number): void { this.findorAddLine(lineName).infoToInt = value; }
+  setLineInt(lineName: string, value: number): void { this.findorAddLine(lineName).setInteger(value); }
 
   getLineInt64(lineName: string, defaultValue: bigint = 0n): bigint {
-    return this.findLine(lineName)?.infoToInt64 ?? defaultValue;
+    return this.findLine(lineName)?.getInteger64() ?? defaultValue;
   }
-  setLineInt64(lineName: string, value: bigint): void { this.findorAddLine(lineName).infoToInt64 = value; }
+  setLineInt64(lineName: string, value: bigint): void { this.findorAddLine(lineName).setInteger64(value); }
 
   getLineString(lineName: string, defaultValue?: string | null): string | null {
     return this.findLine(lineName)?.infoDisplay ?? (defaultValue ?? null);
@@ -193,24 +240,26 @@ export class LPS implements ILpsDocument {
   setLineString(lineName: string, value: string | null): void { this.findorAddLine(lineName).infoDisplay = value ?? ''; }
 
   getLineDouble(lineName: string, defaultValue: number = 0): number {
-    return this.findLine(lineName)?.infoToDouble ?? defaultValue;
+    return this.findLine(lineName)?.getDouble() ?? defaultValue;
   }
-  setLineDouble(lineName: string, value: number): void { this.findorAddLine(lineName).infoToDouble = value; }
+  setLineDouble(lineName: string, value: number): void { this.findorAddLine(lineName).setDouble(value); }
 
   getLineFloat(lineName: string, defaultValue?: FInt64): FInt64 {
     return this.findLine(lineName)?.getFloat() ?? (defaultValue ?? FInt64.Zero);
   }
   setLineFloat(lineName: string, value: FInt64): void { this.findorAddLine(lineName).setFloat(value); }
 
-  getLineDateTime(lineName: string, defaultValue?: Date): Date | null {
-    return this.findLine(lineName)?.getDateTime() ?? (defaultValue ?? null);
+  /** Missing lines give `defaultValue`, or DateTime.MinValue like C#'s `default(DateTime)`. */
+  getLineDateTime(lineName: string, defaultValue?: Date): Date {
+    return this.findLine(lineName)?.getDateTime() ?? (defaultValue ?? minDate());
   }
   setLineDateTime(lineName: string, value: Date): void { this.findorAddLine(lineName).setDateTime(value); }
 
+  /** Approximate size of the serialized text (`LPS.Length`). */
   get length(): number {
     let len = 3;
     for (const line of this.assemblage) {
-      len += line.name.length + line.getStoreString().length + line.text.length + 6;
+      len += line.name.length + line.getStoreString().length + line.textDisplay.length + 6;
       for (const sub of line.subs) len += sub.name.length + sub.getStoreString().length + 3;
     }
     return len;
@@ -218,5 +267,14 @@ export class LPS implements ILpsDocument {
 
   get count(): number { return this.assemblage.length; }
 
-  toString(): string { return this.assemblage.map(line => line.toString()).join('\n'); }
+  toString(): string {
+    const lines = this.assemblage;
+    let out = '';
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (i > 0) out += '\n';
+      out += line instanceof LineBase ? line.toLpsString() : lpsString(line);
+    }
+    return out;
+  }
 }

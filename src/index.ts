@@ -1,5 +1,5 @@
 // Core classes
-export { Sub, Line, LineDict, LPS, LpsDocument } from './core';
+export { Sub, Line, LineDict, LPS, LpsDocument, LpsDict } from './core';
 
 // Interfaces (type-only)
 export type { ISetObject, ISub, ILine, ILpsDocument } from './types';
@@ -8,4 +8,5 @@ export type { ISetObject, ISub, ILine, ILpsDocument } from './types';
 export { FInt64, textReplace, textDeReplace, getHashCode, getHashCode32, splitLimited } from './utils';
 
 // Structure
-export { StringStructure } from './structure';
+export { StringStructure, SetObject, SetObjectKind } from './structure';
+export type { SetObjectValue } from './structure';

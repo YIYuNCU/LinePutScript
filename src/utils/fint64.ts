@@ -1,9 +1,18 @@
+import { doubleToInt64, formatDouble, tryParseDouble, tryParseInt64, wrapInt64 } from './numeric';
+
 const Anchor = 1_000_000_000n;
 const Anchord = 1_000_000_000.0;
-const NaNValue = 9223372036854775807n - 1n; // long.MaxValue - 1
-const NegativeInfinityValue = -9223372036854775807n + 1n; // long.MinValue + 1
-const PositiveInfinityValue = 9223372036854775807n; // long.MaxValue
+const LONG_MAX = 9223372036854775807n;
+const LONG_MIN = -9223372036854775808n;
+const NaNValue = LONG_MAX - 1n; // long.MaxValue - 1
+const NegativeInfinityValue = LONG_MIN + 1n; // long.MinValue + 1
+const PositiveInfinityValue = LONG_MAX; // long.MaxValue
 
+/**
+ * Fixed-precision decimal stored in a 64-bit integer (9 fractional digits).
+ * Port of the C# `LinePutScript.FInt64` struct; all arithmetic wraps like an
+ * unchecked `long`, and double conversions truncate toward zero.
+ */
 export class FInt64 {
   public readonly m_value: bigint;
 
@@ -11,27 +20,33 @@ export class FInt64 {
     this.m_value = value;
   }
 
+  /** `new FInt64(long)`: the raw underlying value (not scaled). */
   static fromLong(value: bigint): FInt64 {
-    return new FInt64(value);
+    return new FInt64(wrapInt64(value));
   }
 
+  /** `new FInt64(double)`: `(long)(value * Anchord)`. */
   static fromDouble(value: number): FInt64 {
-    return new FInt64(BigInt(Math.round(value * Anchord)));
+    if (value !== value) return FInt64.NaN;
+    if (value === Infinity) return FInt64.PositiveInfinity;
+    if (value === -Infinity) return FInt64.NegativeInfinity;
+    return new FInt64(doubleToInt64(value * Anchord));
   }
 
   static fromNumber(value: number): FInt64 {
     return FInt64.fromDouble(value);
   }
 
-  static fromInt(value: number): FInt64 {
-    return new FInt64(BigInt(value) * Anchor);
+  /** `FromNumberInt` / `FromNumberLong`: the integer `value` itself (scaled by Anchor). */
+  static fromInt(value: number | bigint): FInt64 {
+    return new FInt64(wrapInt64(BigInt(value) * Anchor));
   }
 
   static fromObject(value: unknown): FInt64 {
     if (value instanceof FInt64) return value;
-    if (typeof value === 'bigint') return new FInt64(value);
+    if (typeof value === 'bigint') return new FInt64(wrapInt64(value));
     if (typeof value === 'number') {
-      if (Number.isInteger(value)) return FInt64.fromInt(value);
+      if (Number.isInteger(value) && Math.abs(value) < 9e15) return FInt64.fromInt(value);
       return FInt64.fromDouble(value);
     }
     if (typeof value === 'string') return FInt64.parse(value);
@@ -39,7 +54,7 @@ export class FInt64 {
   }
 
   toDouble(): number {
-    if (this.isNaN()) return NaN;
+    if (this.m_value === NaNValue) return NaN;
     return Number(this.m_value) / Anchord;
   }
 
@@ -48,7 +63,7 @@ export class FInt64 {
   }
 
   toString(): string {
-    return this.toDouble().toString();
+    return formatDouble(this.toDouble());
   }
 
   isNaN(): boolean {
@@ -64,7 +79,8 @@ export class FInt64 {
   }
 
   isFinite(): boolean {
-    return !this.isNaN() && !this.isNegativeInfinity() && !this.isPositiveInfinity();
+    const v = this.m_value;
+    return v !== NaNValue && v !== NegativeInfinityValue && v !== PositiveInfinityValue;
   }
 
   isInfinity(): boolean {
@@ -84,56 +100,56 @@ export class FInt64 {
   }
 
   toInt32(): number {
-    return Math.trunc(this.toDouble());
+    return Math.trunc(this.toDouble()) || 0;
   }
 
   toInt64(): bigint {
     return this.m_value / Anchor;
   }
 
-  // Arithmetic
+  // Arithmetic (unchecked 64-bit wrap-around, as in C#)
   add(other: FInt64): FInt64 {
-    return new FInt64(this.m_value + other.m_value);
+    return new FInt64(wrapInt64(this.m_value + other.m_value));
   }
 
   sub(other: FInt64): FInt64 {
-    return new FInt64(this.m_value - other.m_value);
+    return new FInt64(wrapInt64(this.m_value - other.m_value));
   }
 
   mul(other: FInt64): FInt64 {
-    return new FInt64(this.m_value / 1000n * (other.m_value / 1000n) / 1000n);
+    return new FInt64(wrapInt64((this.m_value / 1000n) * (other.m_value / 1000n)) / 1000n);
   }
 
   div(other: FInt64): FInt64 {
-    return new FInt64(this.m_value * 100000n / other.m_value * 10000n);
+    return new FInt64(wrapInt64((wrapInt64(this.m_value * 100000n) / other.m_value) * 10000n));
   }
 
   addDouble(other: number): FInt64 {
-    return new FInt64(this.m_value + BigInt(Math.round(other * Anchord)));
+    return new FInt64(wrapInt64(this.m_value + doubleToInt64(other * Anchord)));
   }
 
   subDouble(other: number): FInt64 {
-    return new FInt64(this.m_value - BigInt(Math.round(other * Anchord)));
+    return new FInt64(wrapInt64(this.m_value - doubleToInt64(other * Anchord)));
   }
 
   mulDouble(other: number): FInt64 {
-    return new FInt64(BigInt(Math.round(Number(this.m_value) * other)));
+    return new FInt64(doubleToInt64(Number(this.m_value) * other));
   }
 
   divDouble(other: number): FInt64 {
-    return new FInt64(BigInt(Math.round(Number(this.m_value) / other)));
+    return new FInt64(doubleToInt64(Number(this.m_value) / other));
   }
 
   negate(): FInt64 {
-    return new FInt64(-this.m_value);
+    return new FInt64(wrapInt64(-this.m_value));
   }
 
   increment(): FInt64 {
-    return new FInt64(this.m_value + Anchor);
+    return new FInt64(wrapInt64(this.m_value + Anchor));
   }
 
   decrement(): FInt64 {
-    return new FInt64(this.m_value - Anchor);
+    return new FInt64(wrapInt64(this.m_value - Anchor));
   }
 
   // Bitwise
@@ -153,7 +169,24 @@ export class FInt64 {
     return new FInt64(~this.m_value);
   }
 
-  // Comparison
+  // Comparison. The raw operators (< > <= >=) compare m_value, so NaN is simply
+  // the second largest long here, exactly as with the C# operators.
+  lt(other: FInt64): boolean {
+    return this.m_value < other.m_value;
+  }
+
+  gt(other: FInt64): boolean {
+    return this.m_value > other.m_value;
+  }
+
+  le(other: FInt64): boolean {
+    return this.m_value <= other.m_value;
+  }
+
+  ge(other: FInt64): boolean {
+    return this.m_value >= other.m_value;
+  }
+
   compareTo(other: FInt64): number {
     if (this.isNaN()) return -1;
     if (other.isNaN()) return 1;
@@ -162,29 +195,22 @@ export class FInt64 {
     return 0;
   }
 
+  /** `Equals`: NaN is never equal to anything (the `==` operator would compare raw values). */
   equals(other: FInt64): boolean {
     if (this.isNaN() || other.isNaN()) return false;
     return this.m_value === other.m_value;
   }
 
-  // Parse
+  /**
+   * FInt64.Parse: a plain integer is taken as the raw underlying value (the store
+   * format), anything else goes through double parsing; unparsable text is NaN.
+   */
   static parse(s: string): FInt64 {
     if (s === null || s === undefined) return FInt64.NaN;
-    // Try parsing as raw long value first (store string format)
-    const longMatch = /^-?\d+$/.test(s);
-    if (longMatch) {
-      try {
-        const bi = BigInt(s);
-        return new FInt64(bi);
-      } catch {
-        // fall through
-      }
-    }
-    // Try as double
-    const d = Number(s);
-    if (!isNaN(d)) {
-      return FInt64.fromDouble(d);
-    }
+    const raw = tryParseInt64(s);
+    if (raw !== null) return new FInt64(raw);
+    const d = tryParseDouble(s);
+    if (d !== null) return FInt64.fromDouble(d);
     return FInt64.NaN;
   }
 
@@ -198,14 +224,17 @@ export class FInt64 {
   // Constants
   static readonly Anchor = Anchor;
   static readonly Anchord = Anchord;
-  static readonly MinValue = new FInt64(-9223372036854775807n - 1n);
-  static readonly MaxValue = new FInt64(9223372036854775807n);
+  static readonly MinValue = new FInt64(LONG_MIN);
+  static readonly MaxValue = new FInt64(LONG_MAX);
   static readonly NaN = new FInt64(NaNValue);
   static readonly NegativeInfinity = new FInt64(NegativeInfinityValue);
   static readonly PositiveInfinity = new FInt64(PositiveInfinityValue);
   static readonly Zero = new FInt64(0n);
   static readonly One = new FInt64(Anchor);
-  static readonly NegativeOne = FInt64.fromDouble(-1.0);
+  static readonly NegativeOne = new FInt64(-Anchor);
+  static readonly NegativeZero = new FInt64(0n);
+  static readonly E = new FInt64(doubleToInt64(Math.E * Anchord));
+  static readonly Pi = new FInt64(doubleToInt64(Math.PI * Anchord));
   static readonly AdditiveIdentity = new FInt64(0n);
   static readonly MultiplicativeIdentity = new FInt64(Anchor);
 

@@ -1,10 +1,20 @@
 import { FInt64 } from '../utils/fint64';
 import { textReplace, textDeReplace } from '../utils/escaping';
-import { splitLimited } from '../utils/parsing';
+import { dateToTicks, formatDouble, ticksToDate, minDate } from '../utils/numeric';
+import { strToBool, strToDate, strToDouble, strToInt, strToInt64 } from './set-object';
 
+const NEWLINE_RE = /\n/g;
+const ESCAPED_NEWLINE_RE = /\/!n/g;
+
+/**
+ * A `key=value` dictionary stored inside one string, entries separated by "/n"
+ * (every entry, including the last one, is terminated by "/n", as in the C#
+ * original). Used for `Sub.infos` and `Line.texts`.
+ */
 export class StringStructure {
   private setstr: (value: string) => void;
   private getstr: () => string;
+  /** When true the parsed dictionary is cached; when false it is re-parsed on every access. */
   public single: boolean;
   private _cache: Map<string, string> | null = null;
 
@@ -14,48 +24,58 @@ export class StringStructure {
     this.single = single;
   }
 
+  /** Drop the parsed cache (called when the underlying string was replaced from outside). */
+  invalidate(): void {
+    this._cache = null;
+  }
+
   private get cache(): Map<string, string> {
     if (!this.single || this._cache === null) {
-      this._cache = new Map();
+      const map = new Map<string, string>();
       const raw = this.getstr();
-      if (raw) {
-        const pairs = splitLimited(raw, '/n');
-        for (const pair of pairs) {
-          const eqIdx = pair.indexOf('=');
-          if (eqIdx >= 0) {
-            const key = pair.substring(0, eqIdx);
-            const val = pair.substring(eqIdx + 1);
-            this._cache.set(key, val);
-          }
-        }
+      let pos = 0;
+      const len = raw.length;
+      while (pos < len) {
+        let end = raw.indexOf('/n', pos);
+        if (end === -1) end = len;
+        const eq = raw.indexOf('=', pos);
+        if (eq !== -1 && eq < end) map.set(raw.substring(pos, eq), raw.substring(eq + 1, end));
+        pos = end + 2;
       }
+      this._cache = map;
     }
     return this._cache;
   }
 
-  private set cache(value: Map<string, string>) {
-    const parts: string[] = [];
-    for (const [key, val] of value) {
-      parts.push(`${key}=${val}`);
-    }
-    this.setstr(parts.join('/n'));
+  private write(map: Map<string, string>): void {
+    let out = '';
+    for (const [key, val] of map) out += key + '=' + val + '/n';
+    this.setstr(out);
+  }
+
+  private raw(key: string): string | undefined {
+    return this.cache.get(key);
   }
 
   getString(key: string, defaultValue?: string | null): string | null {
-    if (this._cache?.has(key) ?? this.cache.has(key)) {
-      return textDeReplace(this.cache.get(key)!).replace('/!n', '\n');
-    }
+    const raw = this.raw(key);
+    if (raw !== undefined) return textDeReplace(raw).replace(ESCAPED_NEWLINE_RE, '\n');
     return defaultValue !== undefined ? defaultValue : null;
   }
 
   setString(key: string, value: string | null): void {
     const c = this.cache;
-    if (value === null) {
-      c.delete(key);
-    } else {
-      c.set(key, textReplace(value.replace('\n', '/!n')));
-    }
-    this.cache = c;
+    if (value === null) c.delete(key);
+    else c.set(key, textReplace(value.replace(NEWLINE_RE, '/!n')));
+    this.write(c);
+  }
+
+  /** Dictionary-style add: the value is escaped but newlines are not specially encoded. */
+  add(key: string, value: string | null): void {
+    const c = this.cache;
+    if (value === null) c.delete(key);
+    else c.set(key, textReplace(value));
+    this.write(c);
   }
 
   get(key: string): string {
@@ -67,11 +87,8 @@ export class StringStructure {
   }
 
   getBool(key: string, defaultValue: boolean = false): boolean {
-    if (this.cache.has(key)) {
-      const val = this.cache.get(key)!.toLowerCase();
-      return val === 'true' || val === '1' || val === 't';
-    }
-    return defaultValue;
+    const raw = this.raw(key);
+    return raw !== undefined ? strToBool(raw) : defaultValue;
   }
 
   setBool(key: string, value: boolean): void {
@@ -79,21 +96,17 @@ export class StringStructure {
   }
 
   getInt(key: string, defaultValue: number = 0): number {
-    if (this.cache.has(key)) {
-      return parseInt(this.cache.get(key)!, 10) || 0;
-    }
-    return defaultValue;
+    const raw = this.raw(key);
+    return raw !== undefined ? strToInt(raw) : defaultValue;
   }
 
   setInt(key: string, value: number): void {
-    this.setString(key, value.toString());
+    this.setString(key, String(Math.trunc(value)));
   }
 
   getInt64(key: string, defaultValue: bigint = 0n): bigint {
-    if (this.cache.has(key)) {
-      return BigInt(this.cache.get(key)!);
-    }
-    return defaultValue;
+    const raw = this.raw(key);
+    return raw !== undefined ? strToInt64(raw) : defaultValue;
   }
 
   setInt64(key: string, value: bigint): void {
@@ -101,9 +114,8 @@ export class StringStructure {
   }
 
   getFloat(key: string, defaultValue?: FInt64): FInt64 {
-    if (this.cache.has(key)) {
-      return FInt64.parse(this.cache.get(key)!);
-    }
+    const raw = this.raw(key);
+    if (raw !== undefined) return FInt64.parse(raw);
     return defaultValue ?? FInt64.Zero;
   }
 
@@ -111,43 +123,24 @@ export class StringStructure {
     this.setString(key, value.toStoreString());
   }
 
-  getDateTime(key: string, defaultValue?: Date): Date | null {
-    if (this.cache.has(key)) {
-      const raw = this.cache.get(key)!;
-      const longMatch = /^-?\d+$/.test(raw);
-      if (longMatch) {
-        try {
-          const ticks = BigInt(raw);
-          const ticksPerMs = 10000n;
-          const epochOffset = 621355968000000000n;
-          const ms = Number((ticks - epochOffset) / ticksPerMs);
-          return new Date(ms);
-        } catch {
-          return defaultValue ?? null;
-        }
-      }
-      const d = new Date(raw);
-      if (!isNaN(d.getTime())) return d;
-    }
-    return defaultValue ?? null;
+  /** DateTime stored as ticks; missing keys give `defaultValue` or DateTime.MinValue. */
+  getDateTime(key: string, defaultValue?: Date): Date {
+    const raw = this.raw(key);
+    if (raw !== undefined) return strToDate(raw);
+    return defaultValue ?? minDate();
   }
 
   setDateTime(key: string, value: Date): void {
-    const ticksPerMs = 10000n;
-    const epochOffset = 621355968000000000n;
-    const ticks = BigInt(value.getTime()) * ticksPerMs + epochOffset;
-    this.setString(key, ticks.toString());
+    this.setString(key, dateToTicks(value).toString());
   }
 
   getDouble(key: string, defaultValue: number = 0): number {
-    if (this.cache.has(key)) {
-      return parseFloat(this.cache.get(key)!) || 0;
-    }
-    return defaultValue;
+    const raw = this.raw(key);
+    return raw !== undefined ? strToDouble(raw) : defaultValue;
   }
 
   setDouble(key: string, value: number): void {
-    this.setString(key, value.toString());
+    this.setString(key, formatDouble(value));
   }
 
   containsKey(key: string): boolean {
@@ -174,7 +167,7 @@ export class StringStructure {
   remove(key: string): boolean {
     const c = this.cache;
     const result = c.delete(key);
-    if (result) this.cache = c;
+    this.write(c);
     return result;
   }
 

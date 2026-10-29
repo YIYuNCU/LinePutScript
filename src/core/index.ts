@@ -3,3 +3,4 @@ export { Line } from './line';
 export { LineDict } from './line-dict';
 export { LPS } from './lps';
 export { LpsDocument } from './lps-document';
+export { LpsDict } from './lps-dict';

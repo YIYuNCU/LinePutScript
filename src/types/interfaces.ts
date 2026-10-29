@@ -37,6 +37,7 @@ export interface ISub extends ISetObject {
   first(): string | null;
   last(): string | null;
   getLongHashCode(): bigint;
+  getHashCode(): number;
 }
 
 export interface ILine extends ISub {
@@ -59,11 +60,11 @@ export interface ILine extends ISub {
   addRange(newSubs: ISub[]): void;
   insertSub(index: number, newSub: ISub): void;
   insertRange(index: number, newSubs: ISub[]): void;
-  remove(sub: ISub): boolean;
+  remove(target: ISub | string): boolean;
   removeByName(subName: string): boolean;
   removeAll(subName: string): void;
   removeAt(index: number): void;
-  contains(sub: ISub): boolean;
+  contains(target: ISub | string): boolean;
   containsByName(value: string): boolean;
   find(subName: string): ISub | null;
   find(subName: string, subinfo: string): ISub | null;
@@ -76,6 +77,14 @@ export interface ILine extends ISub {
   search(value: string): ISub | null;
   indexOf(subName: string): number;
   indexsOf(subName: string): number[];
+  /** Indexer of the C# original: finds the sub or adds an empty one. */
+  get(subName: string): ISub;
+  at(index: number): ISub | undefined;
+  clear(): void;
+  readonly count: number;
+  firstSub(): ISub | null;
+  lastSub(): ISub | null;
+  [Symbol.iterator](): Iterator<ISub>;
 
   // Typed shorthands (separate names to avoid conflicts with ISetObject methods)
   getSubBool(subName: string): boolean;
@@ -86,7 +95,7 @@ export interface ILine extends ISub {
   setSubInt64(subName: string, value: bigint): void;
   getSubFloat(subName: string, defaultValue?: FInt64): FInt64;
   setSubFloat(subName: string, value: FInt64): void;
-  getSubDateTime(subName: string, defaultValue?: Date): Date | null;
+  getSubDateTime(subName: string, defaultValue?: Date): Date;
   setSubDateTime(subName: string, value: Date): void;
   getSubString(subName: string, defaultValue?: string | null): string | null;
   setSubString(subName: string, value: string | null): void;
@@ -140,7 +149,13 @@ export interface ILpsDocument {
   first(): ILine | null;
   last(): ILine | null;
   getLongHashCode(): bigint;
+  getHashCode(): number;
   toString(): string;
+  /** Indexer of the C# original: finds the line or adds an empty one. */
+  get(lineName: string): ILine;
+  clear(): void;
+  toList(): ILine[];
+  [Symbol.iterator](): Iterator<ILine>;
 
   // Typed shorthands
   getLineBool(lineName: string): boolean;
@@ -155,7 +170,7 @@ export interface ILpsDocument {
   setLineDouble(lineName: string, value: number): void;
   getLineFloat(lineName: string, defaultValue?: FInt64): FInt64;
   setLineFloat(lineName: string, value: FInt64): void;
-  getLineDateTime(lineName: string, defaultValue?: Date): Date | null;
+  getLineDateTime(lineName: string, defaultValue?: Date): Date;
   setLineDateTime(lineName: string, value: Date): void;
 
   readonly length: number;

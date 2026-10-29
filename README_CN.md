@@ -180,7 +180,7 @@ line.getSubString(name, default?) // string | null
 line.setSubString(name, val)
 line.getSubFloat(name, default?)  // FInt64
 line.setSubFloat(name, val)
-line.getSubDateTime(name, default?) // Date | null
+line.getSubDateTime(name, default?) // Date（缺失时为 DateTime.MinValue）
 line.setSubDateTime(name, val)
 ```
 
@@ -274,6 +274,21 @@ doc.readCanNext()    // boolean
 doc.lineNode         // 获取/设置游标位置（从 0 开始，自动钳制）
 ```
 
+### `LpsDict`
+
+以唯一名称为键的文档（C# 原版的 `LPS_D`），用于本地化文件（`key#value:|`）。接口与 `LPS` 相同；添加同名行会替换旧行，`findLine(name)` 为 O(1)。
+
+```typescript
+const dict = new LpsDict('hello#你好:|\nbye#再见:|');
+dict.getLineString('hello');        // '你好'
+dict.getLineString('missing', '?'); // '?'
+dict.toString();
+```
+
+### `SetObject`
+
+`Sub.infoObject` 背后的类型化值容器：保留写入时的类型（string、int、long、double、FInt64、boolean、DateTime），并按 C# `SetObject` 的规则在类型间转换。`getStoreString()` 是写入文件的文本，`getString()` 是可读文本。
+
 ### `StringStructure`
 
 对以 `/n` 分隔的 `key=value` 对编码的字符串的字典视图，带缓存。
@@ -293,7 +308,7 @@ ss.setInt('key', 42)
 ss.getInt64('key')            // bigint
 ss.getDouble('key')           // number
 ss.getFloat('key')            // FInt64
-ss.getDateTime('key')         // Date | null
+ss.getDateTime('key')         // Date（缺失时为 DateTime.MinValue）
 ss.containsKey('key')         // boolean
 ss.remove('key')              // boolean
 ss.clear()
@@ -334,9 +349,15 @@ import { textReplace, textDeReplace, getHashCode, getHashCode32, splitLimited } 
 textReplace('hello|world')    // → 'hello/!|world'（显示 → 存储）
 textDeReplace('hello/!|world') // → 'hello|world'（存储 → 显示）
 getHashCode('text')           // → bigint（基于 SHA-512, 64 位小端）
-getHashCode32('text')         // → number（32 位）
+getHashCode32('text')         // → number（有符号低 32 位）
 splitLimited('a:b:c', ':', 1) // → ['a', 'b:c']
 ```
+
+## 发布包说明
+
+- 发布的 bundle 已压缩，不含 source map，所有以 `_` 开头的内部成员都被重命名。请勿继承这些类并依赖 `_` 成员。
+- 哈希（`getHashCode`、`getLongHashCode`）与 C# 库一致（SHA-512 取前 8 字节小端），不依赖 Node 或 Web Crypto，在任何运行时都可用。
+- `Date` 以 UTC 承载 .NET 的墙上时间；缺失的日期为 `DateTime.MinValue`（公元 1 年），不会是 `null`。
 
 ## TypeScript
 

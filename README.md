@@ -180,13 +180,13 @@ line.getSubString(name, default?) // string | null
 line.setSubString(name, val)
 line.getSubFloat(name, default?)  // FInt64
 line.setSubFloat(name, val)
-line.getSubDateTime(name, default?) // Date | null
+line.getSubDateTime(name, default?) // Date (DateTime.MinValue when missing)
 line.setSubDateTime(name, val)
 ```
 
 ### `LineDict` (extends `Sub`)
 
-Same interface as `Line` but backed by a `Map<string, ISub>` for unique-name fast O(1) lookup. When duplicate names are added, the last one wins.
+Same interface as `Line` but backed by a `Map<string, ISub>` for unique-name fast O(1) lookup. When duplicate names are added, the last one wins. Like `Line_D` in the C# original, `find(name, info)` / `findInfo` compare the display text and `contains(sub)` compares names only.
 
 ### `LPS` / `LpsDocument`
 
@@ -274,6 +274,21 @@ doc.readCanNext()    // boolean
 doc.lineNode         // get/set cursor position (0-based, clamped)
 ```
 
+### `LpsDict`
+
+Document whose lines are keyed by unique name (`LPS_D` in the C# original), the form used for localization files (`key#value:|`). Same interface as `LPS`; adding a line with an existing name replaces it and `findLine(name)` is O(1).
+
+```typescript
+const dict = new LpsDict('hello#你好:|\nbye#再见:|');
+dict.getLineString('hello');        // '你好'
+dict.getLineString('missing', '?'); // '?'
+dict.toString();
+```
+
+### `SetObject`
+
+The typed value container behind `Sub.infoObject`: it keeps the kind that was written (string, int, long, double, FInt64, boolean, DateTime) and converts between kinds like the C# `SetObject`. `getStoreString()` is the file text, `getString()` the readable text.
+
 ### `StringStructure`
 
 A dictionary view over a string encoded as `/n`-delimited `key=value` pairs, with caching.
@@ -293,7 +308,7 @@ ss.setInt('key', 42)
 ss.getInt64('key')            // bigint
 ss.getDouble('key')           // number
 ss.getFloat('key')            // FInt64
-ss.getDateTime('key')         // Date | null
+ss.getDateTime('key')         // Date (DateTime.MinValue when missing)
 ss.containsKey('key')         // boolean
 ss.remove('key')              // boolean
 ss.clear()
@@ -334,9 +349,15 @@ import { textReplace, textDeReplace, getHashCode, getHashCode32, splitLimited } 
 textReplace('hello|world')    // → 'hello/!|world' (display → storage)
 textDeReplace('hello/!|world') // → 'hello|world' (storage → display)
 getHashCode('text')           // → bigint (SHA-512 based, 64-bit LE)
-getHashCode32('text')         // → number (32-bit)
+getHashCode32('text')         // → number (signed low 32 bits)
 splitLimited('a:b:c', ':', 1) // → ['a', 'b:c']
 ```
+
+## Notes on the published build
+
+- The bundles are minified, ship without source maps and every internal `_`-prefixed member is renamed. Do not subclass the classes and rely on `_` members.
+- Hashes (`getHashCode`, `getLongHashCode`) are identical to the C# library (SHA-512, first 8 bytes little-endian) and are computed without Node or Web Crypto, so they work in every runtime.
+- `Date` values carry the .NET wall-clock time as UTC; missing dates are `DateTime.MinValue` (year 1), never `null`.
 
 ## TypeScript
 

@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build & Test Commands
 
-- **Build**: `npm run build` (tsup ESM+CJS+dts)
+- **Build**: `npm run build` (tsup ESM+CJS+dts, minified, `_`-prefixed members mangled, no source maps)
+- **Smoke test of dist**: `npm run smoke` (loads the built ESM and CJS bundles)
+- **Benchmark**: `npm run bench [dist ...]` (compare dist folders)
 - **Test (all)**: `npm test` (vitest run)
 - **Test (single file)**: `npx vitest run tests/sub.test.ts`
 - **Test (watch)**: `npm run test:watch`
@@ -17,20 +19,25 @@ src/
   index.ts                  — Re-exports all public API
   utils/
     escaping.ts             — textReplace/textDeReplace (display↔storage)
-    hashing.ts              — FNV-1a 64-bit/32-bit hash
+    hashing.ts              — SHA-512 (32-bit word pairs); first 8 bytes LE = C# Sub.GetHashCode
     fint64.ts               — FInt64 fixed-precision decimal class
+    numeric.ts              — .NET compatible parse/format/ticks helpers (internal)
     parsing.ts              — splitLimited helper
   types/
     interfaces.ts           — ISetObject, ISub, ILine, ILpsDocument
   core/
-    sub.ts                  — Sub (name + info, typed accessors)
-    line.ts                 — Line extends Sub (subs[], text, comments)
-    line-dict.ts            — LineDict (Map-backed unique-name subs)
-    lps.ts                  — LPS document (lines collection)
+    sub.ts                  — Sub (name + info, lazily typed via SetObject)
+    line-base.ts            — LineBase: text/comments/parse/toString/hash/typed getSub*, shared by Line and LineDict
+    line.ts                 — Line (ordered subs array)
+    line-dict.ts            — LineDict (Map-backed unique-name subs, Line_D)
+    lps.ts                  — LPS document (ordered lines)
+    lps-dict.ts             — LpsDict (name-keyed lines, LPS_D; the key#value localization format)
     lps-document.ts         — LpsDocument extends LPS (cursor ops)
   structure/
     string-structure.ts     — /n-delimited key=value dictionary
+    set-object.ts           — SetObject typed value container (string/int/long/double/FInt64/bool/DateTime)
 tests/
+  fidelity.test.ts          — C# behaviour checks (escaping equivalence, typed values, LpsDict, ...)
   escaping.test.ts
   sub.test.ts
   line.test.ts
@@ -62,7 +69,13 @@ LPS  ─── ILpsDocument               # Collection of Lines
 - **Escape order**: `textReplace` must replace `|` before `/`, otherwise already-escaped sequences get corrupted. `textDeReplace` restores in reverse: `/!` → `/` before `/|` → `|`. The sequence `:|` cannot survive as a unit — `|` gets replaced first so `:|` becomes `:/!|`.
 - **Sub round-trip**: `Sub.toString()` produces `name#info:|` with `:|` suffix. This is by design — `:|` is a Line-level separator consumed during Line parsing. Sub is always a segment within a Line.
 - **Line vs LineDict**: Use `Line` for ordered subs (list-style data), `LineDict` for unique-key subs (dictionary-style). `LineDict.subs` getter returns `Array.from(this._subs.values())` — the returned array is a snapshot, not a live view.
-- **Parsing order**: Normalize CRLF → LF, replace multiline markers (`:\n|`→`\n`, `:\n:`→`""`), split by `\n`, then parse each line. Line parsing: split by `///` for comments → split by `:|` for segments → first segment splits by `#` for name/info → middle segments are Subs → last segment is text.
+- **Parsing order**: Strip BOM and `\r`, replace multiline markers (`:\n|`→`/n`, `:\n:`→`""`), split by `\n` (only empty lines are skipped), then parse each line. Line parsing: cut at the first `///` for comments → split by `:|` for segments → first segment splits by `#` for name/info → middle segments are Subs → last segment is text.
+- **Escaping** is implemented as single-pass loops equal to the chained `String.Replace` calls of C# (a randomized equivalence test in `tests/fidelity.test.ts` guards this).
+- **Hashing**: `getHashCode` is the first 8 bytes of SHA-512 as a little-endian signed int64, like C# `Sub.GetHashCode(string)`. Sums (`getLongHashCode`) wrap to int64; `getHashCode32` / `Sub.getHashCode()` are the signed low 32 bits.
+- **Typed values**: a `Sub` stores the escaped string it was read from. The first typed write (`setInteger`, `infoToDouble = x`, ...) moves the value into a `SetObject`, which keeps the kind (so typed reads need no parsing) and converts like the C# `SetObject`. `info` is always the store string (DateTime = ticks, FInt64 = raw long, bool = `True`/`False`); `infoDisplay` is the de-escaped display string.
+- **Dates** are .NET DateTimes: the wall-clock value is carried in a JS `Date` as UTC. Missing values give `DateTime.MinValue` (year 1), never `null`.
+- **`_`-prefixed members** are internal. The published build renames them (esbuild `mangleProps: /^_/`), so subclasses outside this package must not rely on them.
+- **Dictionary variants** (`LineDict`, `LpsDict`) match by *display* text when searching by info (as `Line_D` / `LPS_D`), `contains` is by name, and adding an existing name replaces it.
 
 ## C# to TypeScript Adaptations
 
